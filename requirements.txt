@@ -1,2 +1,5 @@
 mypy
+pymongo
 pytest
+six
+
