@@ -21,10 +21,9 @@ class SchemaOutput(object):
         self.begin()
         self.begin_itemize()
         table = schema.table
-        for i, row in enumerate(table):
-            if row['parent'] < 0:
+        for i in range(len(table)):
+            if table[i]['parent'] < 0:
                 self._item(table, i)
-        self.end_itemize()
         self.end()
 
     def write(self, txt):
@@ -35,20 +34,26 @@ class SchemaOutput(object):
         self._stream.write('\n')
 
     def _item(self, table, i):
-        self.begin_item()
         row = table[i]
         if row['type'] not in ('dict', 'array'):
+            self.begin_item()
             self._value(row['key'], row['type'])
+            self.end_item()
         else:
-            self.one(row['key'])
-            self.depth += 1
+            key = row['key']
+            if key:
+                symbol = ('{}', '[]')[row['type'] == 'array']
+                self.begin_item()
+                self.one('{}{}'.format(key, symbol))
+                self.depth += 1
             self.begin_itemize()
-            for j in range(i + 1, len(table)):
+            for j in range(len(table)):
                 if table[j]['parent'] == i:
                     self._item(table, j)
             self.end_itemize()
-            self.depth -= 1
-        self.end_item()
+            if key:
+                self.depth -= 1
+                self.end_item()
 
     def _value(self, key: str, type_: str):
         if key:
@@ -91,23 +96,22 @@ class SchemaOutput(object):
 
 class SimpleText(SchemaOutput):
     def begin(self):
-        #self.writeln('{database}/{collection}:'.format(**self.names))
         self.writeln('---')
-        
+
     def end(self):
         pass
 
     def begin_itemize(self):
-        self.writeln('')
+        pass
 
     def end_itemize(self):
         pass
 
     def begin_item(self):
-        self.write('{}- '.format('  ' * self.depth))
+        self.write('\n{}- '.format('  ' * (self.depth - 1)))
 
     def end_item(self):
-        self.writeln('')
+        pass
 
     def one(self, value):
         self.write(str(value))

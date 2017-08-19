@@ -27,27 +27,37 @@ class Schema(object):
     def __init__(self):
         self._table = []
         self._done = False
+        self._iter_table, self._cmp_table = None, None
 
     @property
     def table(self):
-        return [{'depth': t[0], 'key': t[1], 'type': t[2], 'parent': t[3]}
-                for t in self._table]
+        return self._iter_table
+
+    @property
+    def cmp_table(self):
+        return self._cmp_table
 
     def add(self, depth: int, key: str, type_: str, parent: int) -> int:
         if self._done:
             raise RuntimeError('Cannot add to schema after done() is called')
-        self._table.append((depth, key, type_, parent))
+        skip, row = False, (depth, key, type_, parent)
+        # remove duplicate scalar array entries (e.g. 'str' only once)
+        skip = ((parent >= 0 and self._table[parent][2] == 'array') and
+                (type_ not in ('dict', 'array')) and (row in self._table))
+        if not skip:
+            self._table.append(row)
         return len(self._table) - 1
 
     def done(self):
-        self._table.sort()
-        self._table = tuple(self._table)
+        self._iter_table = [{'depth': t[0], 'key': t[1], 'type': t[2], 'parent': t[3]}
+                            for t in self._table]
+        self._cmp_table = sorted(self._table)
         self._done = True
 
     def compare(self, other) -> CompareResult:
         if not self._done:
             raise RuntimeError('Must call done() first')
-        t1, t2 = self.table, other.table
+        t1, t2 = self.cmp_table, other.cmp_table
         if len(t1) != len(t2):
             return CompareResult(CompareResult.LENGTH,
                                  len(t1), len(t2))
@@ -66,7 +76,7 @@ class Schema(object):
     def __hash__(self):
         if not self._done:
             raise RuntimeError('Must call done() first')
-        return hash(self._table)
+        return hash(self.cmp_table)
 
 
 class SchemaFactory(object):
@@ -76,11 +86,9 @@ class SchemaFactory(object):
         self.schema = None
 
     def process(self, input_data: dict) -> Schema:
-        #print('@@ {}'.format(input_data))
         schema = Schema()
         self._process_dict(schema, -1, 0, input_data)
         schema.done()
-        #print('@@S {}'.format(schema.table))
         return schema
 
     def _process_dict(self, schema: Schema, n: int, depth: int, obj: dict):
@@ -91,8 +99,9 @@ class SchemaFactory(object):
                 continue
             t = self._type_name(val)
             i = schema.add(depth, key, t, n)
+            # print('@@ {:d}->{:d}: key={} type={}'.format(n, i, key, t))
             if t == 'array':
-                self._process_array(schema, i, depth + 1 , val)
+                self._process_array(schema, i, depth + 1, val)
             elif t == 'dict':
                 self._process_dict(schema, i, depth + 1, val)
 
@@ -100,6 +109,7 @@ class SchemaFactory(object):
         for val in arr:
             t = self._type_name(val)
             i = schema.add(depth, '', t, n)
+            # print('@@ {:d}->{:d}: key=NA type={}'.format(n, i, t))
             if t == 'array':
                 self._process_array(schema, i, depth + 1 , val)
             elif t == 'dict':
