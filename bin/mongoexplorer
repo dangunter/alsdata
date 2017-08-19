@@ -1,0 +1,76 @@
+#!/usr/bin/env python
+"""
+Explore mongodb schemas
+"""
+# Stdlib
+import argparse
+import sys
+# Third-party
+from pymongo import MongoClient
+# Local
+from alsdata import core, report
+
+
+class FoundSchemas(object):
+    def __init__(self):
+        self.schemas = {}
+
+    def add(self, s, ident):
+        try:
+            self.schemas[s].append(ident)
+        except KeyError:
+            self.schemas[s] = [ident]
+
+    def __iter__(self):
+        return iter(self.schemas.keys())
+
+
+def process_collection(coll):
+    sf = core.SchemaFactory()
+    schemas = FoundSchemas()
+    n = 0
+    for doc in coll.find():
+        schema = sf.process(doc)
+        schemas.add(schema, doc['_id'])
+        n += 1
+    print('{}'.format(n))
+    return schemas
+
+
+def print_reports(schemas, reporter):
+    for s in schemas:
+        reporter.write_schema(s)
+
+
+def connect(host: str, port: int):
+    if not host and not port:
+        conn = MongoClient()
+    elif host and not port:
+        conn = MongoClient('mongodb://{}'.format(host))
+    elif port and not host:
+        conn = MongoClient('mongodb://:{:d}'.format(port))
+    else:
+        conn = MongoClient('mongodb://{}:{:d}'.format(host, port))
+    return conn
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument('-s', '--server', dest='host', default=None)
+    p.add_argument('-p', '--port', dest='port', type=int, default=0)
+    p.add_argument('-d', '--db', dest='db', default='alsdata')
+    p.add_argument('-c', '--df', dest='coll', default='test')
+    p.add_argument('-o', '--output', dest='output', default='simple')
+    args = p.parse_args()
+    #
+    conn = connect(args.host, args.port)
+    db = conn.get_database(args.db)
+    coll = db.get_collection(args.coll)
+    found = process_collection(coll)
+    #
+    reporter = report.SimpleText(sys.stdout, args.db, args.coll)
+    print_reports(found, reporter)
+    return 0
+
+if __name__ == '__main__':
+    sys.exit(main())
