@@ -11,19 +11,6 @@ from pymongo import MongoClient
 from alsdata import core, report
 
 
-class FoundSchemas(object):
-    def __init__(self):
-        self.schemas = {}
-
-    def add(self, s, ident):
-        try:
-            self.schemas[s].append(ident)
-        except KeyError:
-            self.schemas[s] = [ident]
-
-    def __iter__(self):
-        return iter(self.schemas.keys())
-
 
 def process_collection(coll):
     sf = core.SchemaFactory()

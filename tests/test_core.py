@@ -14,9 +14,10 @@ def teardown():
     pass
 
 
-def test_schema_factory():
+def test_same_schema():
     sf = core.SchemaFactory()
-    d1 = {'fruit': {'bananas': 1, 'apples': 3},
+    d1 = {'_id': '001',
+          'fruit': {'bananas': 1, 'apples': 3},
          'veggies': [
              {'pulses': {'lentils': 4.0, 'chickpeas': 1.2}},
              {'greens': {'kale': 3, 'chard': list(range(10))}},
@@ -26,10 +27,23 @@ def test_schema_factory():
          ],
 }
     d2 = d1.copy()
+    d2['_id'] = '002'
     #
-    s1, s2 = map(sf.process, [d1, d2])
+    schemas = core.SchemaSet()
+    s = None
+    for data in d1, d2:
+        s = sf.process(data)
+        schemas.add(s, data['_id'])
+    #
+    assert len(schemas) == 1
+    assert len(schemas[s]) == 2
+
+
+def _format_schema(output=False):
     strm = StringIO()
     txt = report.SimpleText(strm, 'test', 'test')
     txt.write_schema(s1)
     s = strm.getvalue()
-    print(s)
+    if output:
+        print(s)
+    return s

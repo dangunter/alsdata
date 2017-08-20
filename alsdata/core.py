@@ -31,6 +31,9 @@ class Schema(object):
 
     @property
     def table(self):
+        if self._iter_table is None:
+            self._iter_table = [{'depth': t[0], 'key': t[1], 'type': t[2],
+                                 'parent': t[3]} for t in self._table]
         return self._iter_table
 
     @property
@@ -49,9 +52,7 @@ class Schema(object):
         return len(self._table) - 1
 
     def done(self):
-        self._iter_table = [{'depth': t[0], 'key': t[1], 'type': t[2], 'parent': t[3]}
-                            for t in self._table]
-        self._cmp_table = sorted(self._table)
+        self._cmp_table = tuple(sorted(self._table))
         self._done = True
 
     def compare(self, other) -> CompareResult:
@@ -62,8 +63,10 @@ class Schema(object):
             return CompareResult(CompareResult.LENGTH,
                                  len(t1), len(t2))
         for item1, item2 in zip(t1, t2):
-            for attr in 'depth', 'key', 'type', 'parent':
-                a1, a2 = item1[attr], item2[attr]
+            if item1 == item2:
+                continue
+            for idx, attr in enumerate(('depth', 'key', 'type', 'parent')):
+                a1, a2 = item1[idx], item2[idx]
                 if a1 != a2:
                     return CompareResult(CompareResult.CONST[attr], a1, a2)
         return CompareResult()
@@ -129,3 +132,25 @@ class SchemaFactory(object):
             return 'array'
         raise ValueError('Cannot determine type for "{}" ({})'.format(
             val, type(val)))
+
+
+class SchemaSet(object):
+    """A set of distinct schemas.
+    """
+    def __init__(self):
+        self.schemas = {}
+
+    def add(self, s, id_):
+        try:
+            self.schemas[s].append(id_)
+        except KeyError:
+            self.schemas[s] = [id_]
+
+    def __iter__(self):
+        return iter(self.schemas.keys())
+
+    def __getitem__(self, key):
+        return self.schemas[key]
+
+    def __len__(self):
+        return len(self.schemas)
