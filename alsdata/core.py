@@ -31,9 +31,10 @@ class Schema(object):
 
     @property
     def table(self):
+        tbl = self._cmp_table if self._done else self._table
         if self._iter_table is None:
             self._iter_table = [{'depth': t[0], 'key': t[1], 'type': t[2],
-                                 'parent': t[3]} for t in self._table]
+                                 'parent': t[3]} for t in tbl]
         return self._iter_table
 
     @property
@@ -45,11 +46,19 @@ class Schema(object):
             raise RuntimeError('Cannot add to schema after done() is called')
         skip, row = False, (depth, key, type_, parent)
         # remove duplicate scalar array entries (e.g. 'str' only once)
+        # note: this is a simple case for eliminating duplicate array entries
+        # (including array and dict entries).
         skip = ((parent >= 0 and self._table[parent][2] == 'array') and
                 (type_ not in ('dict', 'array')) and (row in self._table))
         if not skip:
             self._table.append(row)
         return len(self._table) - 1
+
+    def check_arr_dup(self, arr_idx, item_idx):
+        print('@@ check arr dup of item {:d} in array {:d}'.format(item_idx, arr_idx))
+        # make sub-schema for item, and all other children of arr
+        # see if item matches any of the other children
+        # if so, remove all its rows
 
     def done(self):
         self._cmp_table = tuple(sorted(self._table))
@@ -114,9 +123,10 @@ class SchemaFactory(object):
             i = schema.add(depth, '', t, n)
             # print('@@ {:d}->{:d}: key=NA type={}'.format(n, i, t))
             if t == 'array':
-                self._process_array(schema, i, depth + 1 , val)
+                self._process_array(schema, i, depth + 1, val)
             elif t == 'dict':
                 self._process_dict(schema, i, depth + 1, val)
+            schema.check_arr_dup(n, i)
 
     @staticmethod
     def _type_name(val):

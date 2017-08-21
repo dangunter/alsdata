@@ -18,7 +18,7 @@ def test_same_schema():
     sf = core.SchemaFactory()
     d1 = {'_id': '001',
           'fruit': {'bananas': 1, 'apples': 3},
-         'veggies': [
+          'veggies': [
              {'pulses': {'lentils': 4.0, 'chickpeas': 1.2}},
              {'greens': {'kale': 3, 'chard': list(range(10))}},
              'organic',
@@ -39,10 +39,47 @@ def test_same_schema():
     assert len(schemas[s]) == 2
 
 
-def _format_schema(output=False):
+def test_array_dedup():
+    d = {
+        "addresses": [
+        {"street": "123 fake street", "city": "berkeley", "type": "home"},
+        {"street": "123 fake street", "city": "martinez", "type": "work"},
+        {"city": "dome city", "planet": "mars", "type": "sci-fi"},
+        {"city": "mereen", "planet": "game of thrones", "type": "fantasy"},
+        {"locations": [
+            {"countries": [
+                "France", "Spain", "Frain", "Spance"
+            ]},
+            {"altitudes": [
+                20, 10, "high", "lowly"
+            ]}
+        ]}
+    ]}
+
+    s = core.SchemaFactory().process(d)
+    tbl = s.table
+
+    # expected:
+    #   (#) key        type    parent
+    #    0  addresses  array   -1
+    #    1  --         dict    0
+    #    2  --         dict    0
+    #    3  --         dict    0
+    #    4  city       str     <1,2, or 3>
+
+    assert tbl[0]['key'] == 'addresses'
+    assert tbl[0]['type'] == 'array'
+    for i in range(1, 4):
+        assert tbl[i]['key'] == ''
+        assert tbl[i]['type'] == 'dict'
+    assert tbl[4]['key'] == 'city'
+    assert tbl[4]['type'] == 'str'
+    assert tbl[4]['parent'] in (1, 2, 3)
+
+def _format_schema(s, output=False):
     strm = StringIO()
     txt = report.SimpleText(strm, 'test', 'test')
-    txt.write_schema(s1)
+    txt.write_schema(s)
     s = strm.getvalue()
     if output:
         print(s)

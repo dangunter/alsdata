@@ -102,7 +102,7 @@ class SimpleText(SchemaOutput):
         pass
 
     def begin_itemize(self):
-        pass
+        self.write('\n{}-'.format(' ' * (self.depth - 1)))
 
     def end_itemize(self):
         pass
