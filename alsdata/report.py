@@ -2,6 +2,11 @@
 Report output formatting.
 """
 import abc
+from .core import Schema
+
+I_P = Schema.Column.PARENT_IDX
+I_T = Schema.Column.TYPE_IDX
+I_K = Schema.Column.KEY_IDX
 
 
 class SchemaOutput(object):
@@ -22,7 +27,7 @@ class SchemaOutput(object):
         self.begin_itemize()
         table = schema.table
         for i in range(len(table)):
-            if table[i]['parent'] < 0:
+            if table[i][I_P] < 0:
                 self._item(table, i)
         self.end()
 
@@ -35,20 +40,20 @@ class SchemaOutput(object):
 
     def _item(self, table, i):
         row = table[i]
-        if row['type'] not in ('dict', 'array'):
+        if row[I_T] not in ('dict', 'array'):
             self.begin_item()
-            self._value(row['key'], row['type'])
+            self._value(row[I_K], row[I_T])
             self.end_item()
         else:
-            key = row['key']
+            key = row[I_K]
             if key:
-                symbol = ('{}', '[]')[row['type'] == 'array']
+                symbol = ('{}', '[]')[row[I_T] == 'array']
                 self.begin_item()
                 self.one('{}{}'.format(key, symbol))
                 self.depth += 1
             self.begin_itemize()
             for j in range(len(table)):
-                if table[j]['parent'] == i:
+                if table[j][I_P] == i:
                     self._item(table, j)
             self.end_itemize()
             if key:

@@ -11,10 +11,9 @@ from pymongo import MongoClient
 from alsdata import core, report
 
 
-
 def process_collection(coll):
     sf = core.SchemaFactory()
-    schemas = FoundSchemas()
+    schemas = core.SchemaSet()
     n = 0
     for doc in coll.find():
         schema = sf.process(doc)
@@ -45,8 +44,10 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('-s', '--server', dest='host', default=None)
     p.add_argument('-p', '--port', dest='port', type=int, default=0)
-    p.add_argument('-d', '--db', dest='db', default='alsdata')
-    p.add_argument('-c', '--df', dest='coll', default='test')
+    p.add_argument('-d', '--db', dest='db', default='alsdata',
+                   help='Target database, default=alsdata')
+    p.add_argument('-c', '--df', dest='coll', default='test',
+                   help='Target collection, default=test')
     p.add_argument('-o', '--output', dest='output', default='simple')
     args = p.parse_args()
     #

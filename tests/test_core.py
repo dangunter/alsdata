@@ -48,10 +48,11 @@ def test_array_dedup():
         {"city": "mereen", "planet": "game of thrones", "type": "fantasy"},
         {"locations": [
             {"countries": [
-                "France", "Spain", "Frain", "Spance"
+                "France", "Spain", "Spain", "France"
             ]},
             {"altitudes": [
-                20, 10, "high", "lowly"
+                "uno", "dos", "tres", "quatro", "cinco", "cinco", "seis",
+                1, 2, 3, 4, 5, 5, 6
             ]}
         ]}
     ]}
@@ -59,22 +60,47 @@ def test_array_dedup():
     s = core.SchemaFactory().process(d)
     tbl = s.table
 
+    # Debugging
+    # print('\nIDX Dp Key                  Type        Parent')
+    # for i, row in enumerate(tbl):
+    #     print('{:3d} {:2d} {:20s} {:12s} {:2d}'
+    #           .format(i, *row))
+
     # expected:
     #   (#) key        type    parent
     #    0  addresses  array   -1
     #    1  --         dict    0
     #    2  --         dict    0
     #    3  --         dict    0
-    #    4  city       str     <1,2, or 3>
-
-    assert tbl[0]['key'] == 'addresses'
-    assert tbl[0]['type'] == 'array'
+    #    4  city       str     <1 - 3>
+    #    5  city       str     <1 - 3>
+    #    6  locations  array   <1 - 3>
+    _key, _type = core.Schema.Column.KEY_IDX, core.Schema.Column.TYPE_IDX
+    _parent = core.Schema.Column.PARENT_IDX
+    assert tbl[0][_key] == 'addresses'
+    assert tbl[0][_type] == 'array'
     for i in range(1, 4):
-        assert tbl[i]['key'] == ''
-        assert tbl[i]['type'] == 'dict'
-    assert tbl[4]['key'] == 'city'
-    assert tbl[4]['type'] == 'str'
-    assert tbl[4]['parent'] in (1, 2, 3)
+        assert tbl[i][_key] == ''
+        assert tbl[i][_type] == 'dict'
+    for i in 4, 5:
+        assert tbl[i][_key] == 'city'
+        assert tbl[i][_type] == 'str'
+        assert tbl[i][_parent] in (1, 2, 3)
+    assert tbl[6][_key] == 'locations'
+    assert tbl[6][_type] == 'array'
+    assert tbl[6][_parent] in (1, 2, 3, 4, 5)
+
+
+def test_simple_array():
+    d1 = {"numbers": [{"num": 1, "name": "one"}, {"num": 2, "name": "two"}]}
+    d2 = {"numbers": [{"num": 3, "name": "three"}, {"num": 4, "name": "four"},
+                      {"num": 5, "name": "five"}]}
+    sf = core.SchemaFactory()
+    s1 = sf.process(d1)
+    s2 = sf.process(d2)
+    cmp = s1.compare(s2)
+    assert bool(cmp) is True
+
 
 def _format_schema(s, output=False):
     strm = StringIO()
