@@ -5,21 +5,75 @@ Explore mongodb schemas
 # Stdlib
 import argparse
 import sys
+import time
 # Third-party
 from pymongo import MongoClient
 # Local
 from alsdata import core, report
 
 
-def process_collection(coll):
+class ProgressMeterBase(object):
+    def __init__(self, target=1, output=sys.stdout):
+        self._tgt = target
+        self._ts = None
+        self._out = output
+
+    def start(self):
+        pass
+
+    def stop(self, p):
+        pass
+
+    def update(self, p):
+        pass
+
+
+class ProgressMeter(ProgressMeterBase):
+    def start(self):
+        self._ts = time.time()
+
+    def stop(self, p):
+        self.update(p)
+        self._out.write('\n')
+
+    def update(self, p):
+        t = time.time()
+        if p >= self._tgt:
+            pct_done = 100
+            eta = 0.0
+        elif p <= 0:
+            pct_done = 0
+            eta = 0.0  # unknown!
+        else:
+            pct_done = (100 * p) // self._tgt
+            elapsed = t - self._ts
+            eta = (self._tgt / p - 1) * elapsed
+        self._out.write('{:3d}% {:8d}/{:8d}   ETA: {:4.0f}s\r'.format(
+            pct_done, p, self._tgt, eta))
+
+
+def process_collection(coll, progress=False):
     sf = core.SchemaFactory()
     schemas = core.SchemaSet()
+
+    if progress:
+        ntot = coll.count()
+        progmeter = ProgressMeter(ntot)
+        nincr = max([100, ntot//100])
+    else:
+        progmeter = ProgressMeterBase()
+        nincr = 100
+
     n = 0
+    progmeter.start()
     for doc in coll.find():
+        if 0 == n % nincr:
+            progmeter.update(n)
         schema = sf.process(doc)
         schemas.add(schema, doc['_id'])
         n += 1
-    print('{}'.format(n))
+    progmeter.stop(n)
+    # print('{}'.format(n))
     return schemas
 
 
@@ -49,12 +103,14 @@ def main():
     p.add_argument('-c', '--df', dest='coll', default='test',
                    help='Target collection, default=test')
     p.add_argument('-o', '--output', dest='output', default='simple')
+    p.add_argument('-P', '--progress', dest='progress', action='store_true',
+                   help='Show progress meter')
     args = p.parse_args()
     #
     conn = connect(args.host, args.port)
     db = conn.get_database(args.db)
     coll = db.get_collection(args.coll)
-    found = process_collection(coll)
+    found = process_collection(coll, progress=args.progress)
     #
     reporter = report.SimpleText(sys.stdout, args.db, args.coll)
     print_reports(found, reporter)
