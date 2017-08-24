@@ -100,23 +100,43 @@ class SchemaOutput(object):
 
 
 class SimpleText(SchemaOutput):
+    def __init__(self, *args):
+        super(SimpleText, self).__init__(*args)
+        self._blank_line = False
+
+    @property
+    def indent(self):
+        return '  ' * (self.depth - 1)
+
+    def writeln(self, s):
+        if s == '':
+            if not self._blank_line:
+                super(SimpleText, self).writeln('')
+            self._blank_line = True
+        else:
+            super(SimpleText, self).writeln(s)
+
+    def write(self, s):
+        self._blank_line = False
+        super(SimpleText, self).write(s)
+
     def begin(self):
-        self.writeln('---')
+        self.writeln('-----------------')
 
     def end(self):
-        pass
+        self.writeln('')
 
     def begin_itemize(self):
-        self.write('\n{}-'.format(' ' * (self.depth - 1)))
+        self.writeln('')
 
     def end_itemize(self):
         pass
 
     def begin_item(self):
-        self.write('\n{}- '.format('  ' * (self.depth - 1)))
+        self.write('{}- '.format(self.indent))
 
     def end_item(self):
-        pass
+        self.writeln('')
 
     def one(self, value):
         self.write(str(value))
