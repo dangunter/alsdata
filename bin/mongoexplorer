@@ -5,6 +5,7 @@ Explore mongodb schemas
 # Stdlib
 import argparse
 import logging
+import os
 import sys
 import time
 # Third-party
@@ -81,7 +82,13 @@ def extract_schemas(coll, progress=False):
     return schemas
 
 
-def print_reports(ofile, schemas, reporter):
+def print_reports(ofile, schemas, reporter, multi_pfx=None):
+    i = 1
+    if multi_pfx is not None:
+        multi_meta = open('{}-meta.csv'.format(multi_pfx), 'w')
+        multi_meta.write('count,file,ids\n')
+    else:
+        multi_meta = None
     for s, ids in schemas.items():
         count = len(ids)
         if len(ids) > 3:
@@ -89,11 +96,17 @@ def print_reports(ofile, schemas, reporter):
                 ids[0], ids[1], ids[-1])
         else:
             idlist = ', '.join(map(str, ids))
-        hdr = '-----------------------\n' \
-              '# Count = {:d}\n' \
-              '# ids = {}\n' \
-              '-----------------------\n'.format(count, idlist)
-        ofile.write(hdr)
+        if multi_pfx is None:
+            hdr = '-----------------------\n' \
+                  '# Count = {:d}\n' \
+                  '# ids = {}\n' \
+                  '-----------------------\n'.format(count, idlist)
+            ofile.write(hdr)
+        else:
+            fname = '{}_{}_{}'.format(multi_pfx, i, count)
+            reporter.set_output_file(open(fname, 'w'))
+            multi_meta.write('{:d},"{}","{}"\n'.format(count, fname, idlist))
+            i += 1
         reporter.write_schema(s)
 
 
@@ -118,22 +131,28 @@ def write_collection_header(db, coll, ofile):
                 .format(coll, count))
 
 
-def process_collection(db, coll, ofile, progress=None, reporter_class=None):
+def process_collection(db, coll, ofile, progress=None,
+                       reporter_class=None, multi_pfx=None):
     coll = db.get_collection(coll)
     found = extract_schemas(coll, progress=progress)
     reporter = reporter_class(ofile, db.name, coll)
-    print_reports(ofile, found, reporter)
+    print_reports(ofile, found, reporter, multi_pfx=multi_pfx)
 
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('-d', '--db', dest='db', default='alsdata',
-                   help='Target database, default=alsdata')
     p.add_argument('-c', '--df', dest='coll', default='test',
                    help='Target collection, default=test. Use "*" for ALL')
+    p.add_argument('-d', '--db', dest='db', default='alsdata',
+                   help='Target database, default=alsdata')
+    p.add_argument('-m', '--multiple', dest='multi', default=None,
+                   metavar='DIR',
+                   help='Create multiple files, one per schema and store '
+                        'them in <DIR>/<OFILE>_<#>')
     p.add_argument('-f', '--format', dest='fmt', default='text',
                    help='Output format (text, json) default=text')
     p.add_argument('-o', '--output', dest='output', default='-',
+                   metavar='OFILE',
                    help='Output file, default=stdout')
     p.add_argument('-p', '--port', dest='port', type=int, default=0)
     p.add_argument('-P', '--progress', dest='progress', action='store_true',
@@ -158,32 +177,43 @@ def main():
     _log.info('Connecting to MongoDB at {}:{}'.format(args.host, args.port))
     conn = connect(args.host, args.port)
     db = conn.get_database(args.db)
-    # output file
-    if args.output == '-':
-        ofile = sys.stdout
-        _log.info('Writing output to stdout')
+    # multiple files
+    if args.multi is not None:
+        if args.output == '-':
+            p.error('-m/--multi option requires -o/--output option to be '
+                    'set (cannot generate multiple files to stdout)')
+        multi_pfx = os.path.join(args.multi, args.output)
+        ofile = None
     else:
-        ofile = open(args.output, 'w')
-        _log.info('Writing output to file "{}"'.format(ofile.name))
+        multi_pfx = None
+        # output file
+        if args.output == '-':
+            ofile = sys.stdout
+            _log.info('Writing output to stdout')
+        else:
+            ofile = open(args.output, 'w')
+            _log.info('Writing output to file "{}"'.format(ofile.name))
     # reporter
-    if args.fmt == 'text':
-        reporter_class = report.SimpleText
-    elif args.fmt == 'json':
-        reporter_class = report.JsonSchemaReport
+    rfmt, rclass = args.fmt.lower(), None
+    if rfmt == 'text':
+        rclass = report.TextReport
+    elif rfmt == 'json':
+        rclass = report.JsonSchemaReport
+    else:
+        p.error('Format must be "json" or "text", got: {}'.format(rfmt))
     # run
     if args.coll == '*':
         _log.info('Processing all collections in DB "{}"'.format(args.db))
         for coll in db.collection_names():
             write_collection_header(db, coll, ofile)
             process_collection(db, coll, ofile, progress=args.progress,
-                               reporter_class=reporter_class)
+                               reporter_class=rclass, multi_pfx=multi_pfx)
     else:
         _log.info('Processing collection "{}" in DB "{}"'.format(args.coll,
                                                                  args.db))
         process_collection(db, args.coll, ofile, progress=args.progress,
-                           reporter_class=reporter_class)
+                           reporter_class=rclass, multi_pfx=multi_pfx)
     return 0
-
 
 
 if __name__ == '__main__':
