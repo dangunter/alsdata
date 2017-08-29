@@ -1,7 +1,28 @@
 """
 Core functionality for alsdata
 """
+import logging
 import six
+
+_LOG_ROOT = 'alsdata'
+
+# one-time log setup
+h = logging.StreamHandler()
+f = logging.Formatter(fmt='%(asctime)s %(name)s [%(levelname)s] %(message)s')
+h.setFormatter(f)
+logging.getLogger(_LOG_ROOT).addHandler(h)
+
+
+def get_logger(name=''):
+    """Create and return a logger instance.
+    Leaving the name blank will get the root logger.
+    """
+    if name:
+        g = logging.getLogger(_LOG_ROOT + '.' + name)
+        g.propagate = True
+    else:
+        g = logging.getLogger(_LOG_ROOT)
+    return g
 
 
 class CompareResult(object):
@@ -230,6 +251,9 @@ class SchemaSet(object):
             is_new = True
             self.schemas[s] = [id_]
         return is_new
+
+    def items(self):
+        return six.iteritems(self.schemas)
 
     def __iter__(self):
         return iter(self.schemas.keys())

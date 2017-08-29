@@ -4,6 +4,7 @@ Explore mongodb schemas
 """
 # Stdlib
 import argparse
+import logging
 import sys
 import time
 # Third-party
@@ -11,12 +12,15 @@ from pymongo import MongoClient
 # Local
 from alsdata import core, report
 
+_log = core.get_logger('mongoexplorer')
+
 
 class ProgressMeterBase(object):
-    def __init__(self, target=1, output=sys.stdout):
+    def __init__(self, target=1, output=sys.stdout, prefix=''):
         self._tgt = target
         self._ts = None
         self._out = output
+        self._pfx = prefix
 
     def start(self):
         pass
@@ -48,17 +52,17 @@ class ProgressMeter(ProgressMeterBase):
             pct_done = (100 * p) // self._tgt
             elapsed = t - self._ts
             eta = (self._tgt / p - 1) * elapsed
-        self._out.write('{:3d}% {:8d}/{:8d}   ETA: {:4.0f}s\r'.format(
-            pct_done, p, self._tgt, eta))
+        self._out.write('{} {:3d}% {:8d}/{:8d}   ETA: {:4.0f}s\r'.format(
+            self._pfx, pct_done, p, self._tgt, eta))
 
 
-def process_collection(coll, progress=False):
+def extract_schemas(coll, progress=False):
     sf = core.SchemaFactory()
     schemas = core.SchemaSet()
 
     if progress:
         ntot = coll.count()
-        progmeter = ProgressMeter(ntot)
+        progmeter = ProgressMeter(ntot, prefix=coll.name)
         nincr = max([100, ntot//100])
     else:
         progmeter = ProgressMeterBase()
@@ -77,8 +81,19 @@ def process_collection(coll, progress=False):
     return schemas
 
 
-def print_reports(schemas, reporter):
-    for s in schemas:
+def print_reports(ofile, schemas, reporter):
+    for s, ids in schemas.items():
+        count = len(ids)
+        if len(ids) > 3:
+            idlist = '{}, {}, .., {}'.format(
+                ids[0], ids[1], ids[-1])
+        else:
+            idlist = ', '.join(map(str, ids))
+        hdr = '-----------------------\n' \
+              '# Count = {:d}\n' \
+              '# ids = {}\n' \
+              '-----------------------\n'.format(count, idlist)
+        ofile.write(hdr)
         reporter.write_schema(s)
 
 
@@ -94,27 +109,83 @@ def connect(host: str, port: int):
     return conn
 
 
+def write_collection_header(db, coll, ofile):
+    count = db.get_collection(coll).count()
+    ofile.write('+=============================\n'
+                '| Collection: {}\n'
+                '| {:d} records\n'
+                '+=============================\n'
+                .format(coll, count))
+
+
+def process_collection(db, coll, ofile, progress=None, reporter_class=None):
+    coll = db.get_collection(coll)
+    found = extract_schemas(coll, progress=progress)
+    reporter = reporter_class(ofile, db.name, coll)
+    print_reports(ofile, found, reporter)
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('-s', '--server', dest='host', default=None)
-    p.add_argument('-p', '--port', dest='port', type=int, default=0)
     p.add_argument('-d', '--db', dest='db', default='alsdata',
                    help='Target database, default=alsdata')
     p.add_argument('-c', '--df', dest='coll', default='test',
-                   help='Target collection, default=test')
-    p.add_argument('-o', '--output', dest='output', default='simple')
+                   help='Target collection, default=test. Use "*" for ALL')
+    p.add_argument('-f', '--format', dest='fmt', default='text',
+                   help='Output format (text, json) default=text')
+    p.add_argument('-o', '--output', dest='output', default='-',
+                   help='Output file, default=stdout')
+    p.add_argument('-p', '--port', dest='port', type=int, default=0)
     p.add_argument('-P', '--progress', dest='progress', action='store_true',
                    help='Show progress meter')
+    p.add_argument('-s', '--server', dest='host', default=None)
+    p.add_argument('-v', '--verbose', dest='vb', action='count', default=0,
+                   help='More messages from the program')
     args = p.parse_args()
     #
+    _root_logger = core.get_logger()
+    vb = int(args.vb)
+    if vb > 2:
+        _log.setLevel(logging.DEBUG)
+        _root_logger.setLevel(logging.DEBUG)
+    elif vb > 1:
+        _log.setLevel(logging.INFO)
+        _root_logger.setLevel(logging.INFO)
+    else:
+        _log.setLevel(logging.WARN)
+        _root_logger.setLevel(logging.WARN)
+    #
+    _log.info('Connecting to MongoDB at {}:{}'.format(args.host, args.port))
     conn = connect(args.host, args.port)
     db = conn.get_database(args.db)
-    coll = db.get_collection(args.coll)
-    found = process_collection(coll, progress=args.progress)
-    #
-    reporter = report.SimpleText(sys.stdout, args.db, args.coll)
-    print_reports(found, reporter)
+    # output file
+    if args.output == '-':
+        ofile = sys.stdout
+        _log.info('Writing output to stdout')
+    else:
+        ofile = open(args.output, 'w')
+        _log.info('Writing output to file "{}"'.format(ofile.name))
+    # reporter
+    if args.fmt == 'text':
+        reporter_class = report.SimpleText
+    elif args.fmt == 'json':
+        reporter_class = report.JsonSchemaReport
+    # run
+    if args.coll == '*':
+        _log.info('Processing all collections in DB "{}"'.format(args.db))
+        for coll in db.collection_names():
+            write_collection_header(db, coll, ofile)
+            process_collection(db, coll, ofile, progress=args.progress,
+                               reporter_class=reporter_class)
+    else:
+        _log.info('Processing collection "{}" in DB "{}"'.format(args.coll,
+                                                                 args.db))
+        process_collection(db, args.coll, ofile, progress=args.progress,
+                           reporter_class=reporter_class)
     return 0
+
+
 
 if __name__ == '__main__':
     sys.exit(main())
+
