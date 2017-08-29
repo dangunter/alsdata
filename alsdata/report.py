@@ -9,151 +9,12 @@ I_T = Schema.Column.TYPE_IDX
 I_K = Schema.Column.KEY_IDX
 I_D = Schema.Column.DEPTH_IDX
 
-class SchemaOutput(object):
-    """Abstract base class for formatting and writing a schema to the output.
-    """
-    __meta__ = abc.ABCMeta
-
-    def __init__(self, stream, database, collection):
-        self._stream = stream
-        self.names = {
-            'database': database,
-            'collection': collection
-        }
-        self.depth = 1
-
-    @property
-    def output(self):
-        return self._stream
-
-    def write_schema(self, schema):
-        self.begin()
-        self.begin_itemize()
-        table = schema.table
-        for i in range(len(table)):
-            if table[i][I_P] < 0:
-                self._item(table, i)
-        self.end()
-
-    def write(self, txt):
-        self._stream.write(txt)
-
-    def writeln(self, txt):
-        self._stream.write(txt)
-        self._stream.write('\n')
-
-    def _item(self, table, i):
-        row = table[i]
-        if row[I_T] not in ('dict', 'array'):
-            self.begin_item()
-            self._value(row[I_K], row[I_T])
-            self.end_item()
-        else:
-            key = row[I_K]
-            if key:
-                is_array = row[I_T] == 'array'
-                self.begin_item(key=key, array=is_array)
-                self.depth += 1
-            self.begin_itemize()
-            for j in range(len(table)):
-                if table[j][I_P] == i:
-                    self._item(table, j)
-            self.end_itemize()
-            if key:
-                self.depth -= 1
-                self.end_item(key=key, array=is_array)
-
-    def _value(self, key: str, type_: str):
-        if key:
-            self.pair(key, type_)
-        else:
-            self.one(type_)
-
-    @abc.abstractmethod
-    def begin(self):
-        pass
-
-    @abc.abstractmethod
-    def end(self):
-        pass
-
-    @abc.abstractmethod
-    def begin_itemize(self):
-        pass
-
-    @abc.abstractmethod
-    def end_itemize(self):
-        pass
-
-    @abc.abstractmethod
-    def begin_item(self, key=None, array=None):
-        pass
-
-    @abc.abstractmethod
-    def end_item(self, key=None, array=None):
-        pass
-
-    @abc.abstractmethod
-    def one(self, value):
-        pass
-
-    @abc.abstractmethod
-    def pair(self, key, value):
-        pass
-
-
-# TODO: Rewrite this class using Reify
-class SimpleText(SchemaOutput):
-    def __init__(self, *args):
-        super(SimpleText, self).__init__(*args)
-        self._blank_line = True
-
-    @property
-    def indent(self):
-        return '  ' * (self.depth - 1)
-
-    def writeln(self, s):
-        if s == '':
-            if not self._blank_line:
-                super(SimpleText, self).writeln('')
-            self._blank_line = True
-        else:
-            super(SimpleText, self).writeln(s)
-
-    def write(self, s):
-        self._blank_line = False
-        super(SimpleText, self).write(s)
-
-    def begin(self):
-        self.writeln('')
-
-    def end(self):
-        self.writeln('')
-
-    def begin_itemize(self):
-        self.writeln('')
-
-    def end_itemize(self):
-        pass
-
-    def begin_item(self, key=None, array=None):
-        if array is None:
-            self.write('{}- '.format(self.indent))
-        else:
-            symbol = ('{}', '[]')[array]
-            self.one('{}{}'.format(key, symbol))
-
-    def end_item(self):
-        self.writeln('')
-
-    def one(self, value):
-        self.write(str(value))
-
-    def pair(self, key, value):
-        self.write('{}: {}'.format(key, value))
-
 
 class Reify(object):
+    """Make a schema concrete by writing it to output.
+
+    This is an abstract superclass.
+    """
     __meta__ = abc.ABCMeta
 
     def __init__(self, output_stream=None):
@@ -161,6 +22,7 @@ class Reify(object):
         self._depth = 0
         self._c = []
         self._ostrm = output_stream
+        self._offset = 0
 
     def row(self, key, type_, depth):
         container = None
@@ -190,6 +52,10 @@ class Reify(object):
     def write(self, s):
         self._ostrm.write(s)
 
+    def iwrite(self, s):
+        indent = (self._depth + self._offset) * '  '
+        self._ostrm.write(indent + s)
+
     @abc.abstractmethod
     def item(self, key, type_):
         pass
@@ -209,12 +75,7 @@ class JsonSchemaify(Reify):
     def __init__(self, **kw):
         super(JsonSchemaify, self).__init__(**kw)
         self._in_list = False
-        self._offset = 0
         self._solo = False
-
-    def iwrite(self, s):
-        indent = (self._depth + self._offset) * '  '
-        self.write(indent + s)
 
     def section_start(self):
         if self._in_list:
@@ -238,7 +99,7 @@ class JsonSchemaify(Reify):
             self.iwrite('"properties": {\n')
         else:
             self.iwrite('"type": "array",\n')
-            self.iwrite('"items": ')
+            self.iwrite('"items": ')  # note, choose [ ] or { } later
         self._offset += 1
         self._in_list = False
 
@@ -271,35 +132,95 @@ class JsonSchemaify(Reify):
         self._in_list = True
 
 
-class JsonSchemaReport(object):
+class Textify(Reify):
+    def item(self, key, type_):
+        if key:
+            self.iwrite('- {}: {}\n'.format(key, type_))
+        else:
+            self.iwrite('- {}\n'.format(type_))
+
+    def begin_container(self, key, type_):
+        symbol = ('{}', '[]')[type_ == 'array']
+        if key:
+            self.iwrite('- {}{}\n'.format(key, symbol))
+        else:
+            self.iwrite('- {}\n'.format(symbol))
+        self._offset += 1
+
+    @abc.abstractmethod
+    def end_container(self, type_):
+        self._offset -= 1
+
+
+class Report(object):
+    __meta__ = abc.ABCMeta
+
     def __init__(self, ofile, *ignore):
         self._o = ofile
-        self.js = None
+        self.rf = None
 
+    def set_output_file(self, o):
+        if self._o:
+            self._o.flush()
+        self._o = o
+
+    @abc.abstractmethod
     def write_schema(self, schema):
-        self.js = JsonSchemaify(output_stream=self._o)
-        self.js.row('', 'dict', 0)  # wrap in outer object
-        # process top-level
-        for i in range(len(schema.table)):
-            if schema.table[i][I_P] < 0:
-                self.process(schema.table, i)
-        self.js.done()
+        pass
 
     def process(self, table, i):
+        """Traverse the table depth-first from i-th element.
+        """
         row = table[i]
         k, t, d = row[I_K], row[I_T], row[I_D] + 1
-        container = self.js.row(k, t, d)
+        container = self.rf.row(k, t, d)
         if container:
             children = [j for j in range(len(table))
                         if table[j][I_P] == i]
-            if container == 'array':
-                # JSON Schema has 2 ways to represent array items,
-                # either as "all of type X" or "type X, type Y, type Z".
-                # One is a single schema, the other a list of schemas.
-                self.js._solo = len(children) == 1
-                if self.js._solo:
-                    self.js.write('{\n')
-                else:
-                    self.js.write('[\n')
-            for child in children:
-                self.process(table, child)
+            self.process_children(table, i, container, children)
+
+    @abc.abstractmethod
+    def process_children(self, table, i, container, children):
+        pass
+
+
+class JsonSchemaReport(Report):
+    def write_schema(self, schema):
+        self.rf = JsonSchemaify(output_stream=self._o)
+        # wrap in outer object
+        self.rf.row('', 'dict', 0)
+        # process top-level elements
+        for i in range(len(schema.table)):
+            if schema.table[i][I_P] < 0:
+                self.process(schema.table, i)
+        # finish up
+        self.rf.done()
+
+    def process_children(self, table, i, container, children):
+        if container == 'array':
+            # JSON Schema has 2 ways to represent array items,
+            # either as "all of type X" or "type X, type Y, type Z".
+            # One is a single schema, the other a list of schemas.
+            # The attribute '_solo' records this decision.
+            self.rf._solo = len(children) == 1
+            if self.rf._solo:
+                self.rf.write('{\n')
+            else:
+                self.rf.write('[\n')
+        for child in children:
+            self.process(table, child)
+
+
+class TextReport(Report):
+    def write_schema(self, schema):
+        self.rf = Textify(output_stream=self._o)
+        # process top-level elements
+        for i in range(len(schema.table)):
+            if schema.table[i][I_P] < 0:
+                self.process(schema.table, i)
+        # finish up
+        self.rf.done()
+
+    def process_children(self, table, i, container, children):
+        for child in children:
+            self.process(table, child)
