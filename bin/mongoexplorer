@@ -6,6 +6,7 @@ Explore mongodb schemas
 import argparse
 import logging
 import os
+import subprocess
 import sys
 import time
 # Third-party
@@ -103,7 +104,7 @@ def print_reports(ofile, schemas, reporter, multi_pfx=None):
                   '-----------------------\n'.format(count, idlist)
             ofile.write(hdr)
         else:
-            fname = '{}_{}_{}'.format(multi_pfx, i, count)
+            fname = '{}_{:03d}_{}'.format(multi_pfx, i, count)
             reporter.set_output_file(open(fname, 'w'))
             multi_meta.write('{:d},"{}","{}"\n'.format(count, fname, idlist))
             i += 1
@@ -139,12 +140,35 @@ def process_collection(db, coll, ofile, progress=None,
     print_reports(ofile, found, reporter, multi_pfx=multi_pfx)
 
 
+def diff_all_files(path, prefix):
+    prefix += '_'
+    files = sorted(filter(lambda s: s.startswith(prefix), os.listdir(path)))
+    n = len(files)
+    for i in range(n):
+        for j in range(i + 1, n):
+            f1, f2 = (os.path.join(path, f) for f in (files[i], files[j]))
+            ofile_path = os.path.join(path, 'diff-{:03d}_{:03d}.json'.format(i, j))
+            ofile = open(ofile_path, 'w')
+            cmd = ['jsondiff', '-i4', f1, f2]
+            _log.debug('Running command "{}" to file "{}"'
+                       .format(cmd, ofile.name))
+            p = subprocess.Popen(cmd, stdout=ofile)
+            if p.wait() != 0:
+                _log.error('Error running command. Abort.')
+                return -1
+    return 0
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('-c', '--df', dest='coll', default='test',
                    help='Target collection, default=test. Use "*" for ALL')
     p.add_argument('-d', '--db', dest='db', default='alsdata',
                    help='Target database, default=alsdata')
+    p.add_argument('-D', '--diff', dest='diff', action='store_true',
+                   help='Instead of extracting schemas, diff schemas in '
+                        'directory given by -m/--multiple and with prefix '
+                        'given by -o/--output')
     p.add_argument('-m', '--multiple', dest='multi', default=None,
                    metavar='DIR',
                    help='Create multiple files, one per schema and store '
@@ -173,6 +197,13 @@ def main():
     else:
         _log.setLevel(logging.WARN)
         _root_logger.setLevel(logging.WARN)
+    #
+    if args.diff:
+        if not args.multi:
+            p.error('-D/--diff option requires directory from -m/--multi')
+        if args.output == '-':
+            p.error('-D/--diff option requires output pattern from -o/--output')
+        return diff_all_files(args.multi, args.output)
     #
     _log.info('Connecting to MongoDB at {}:{}'.format(args.host, args.port))
     conn = connect(args.host, args.port)
