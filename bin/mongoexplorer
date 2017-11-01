@@ -58,9 +58,10 @@ class ProgressMeter(ProgressMeterBase):
             self._pfx, pct_done, p, self._tgt, eta))
 
 
-def extract_schemas(coll, progress=False):
+def extract_schemas(coll, progress=False, skip_fields=None):
     sf = core.SchemaFactory()
     schemas = core.SchemaSet()
+    skip = {k:0 for k in skip_fields} if skip_fields else None
 
     if progress:
         ntot = coll.count()
@@ -72,7 +73,11 @@ def extract_schemas(coll, progress=False):
 
     n = 0
     progmeter.start()
-    for doc in coll.find():
+    if skip:
+        cursor = coll.find({}, skip)
+    else:
+        cursor = coll.find()
+    for doc in cursor:
         if 0 == n % nincr:
             progmeter.update(n)
         schema = sf.process(doc)
@@ -90,7 +95,7 @@ def print_reports(ofile, schemas, reporter, multi_pfx=None):
         multi_meta.write('count,file,ids\n')
     else:
         multi_meta = None
-    for s, ids in schemas.items():
+    for dtrange, s, ids in schemas.items_bydate():
         count = len(ids)
         if len(ids) > 3:
             idlist = '{}, {}, .., {}'.format(
@@ -99,12 +104,14 @@ def print_reports(ofile, schemas, reporter, multi_pfx=None):
             idlist = ', '.join(map(str, ids))
         if multi_pfx is None:
             hdr = '-----------------------\n' \
+                  '# Dates: {} .. {}\n'\
                   '# Count = {:d}\n' \
                   '# ids = {}\n' \
-                  '-----------------------\n'.format(count, idlist)
+                  '-----------------------\n'.format(
+                dtrange[0], dtrange[1], count, idlist)
             ofile.write(hdr)
         else:
-            fname = '{}_{:03d}_{}'.format(multi_pfx, i, count)
+            fname = '{}_{}-{}_{}'.format(multi_pfx, dtrange[0], dtrange[1], count)
             reporter.set_output_file(open(fname, 'w'))
             multi_meta.write('{:d},"{}","{}"\n'.format(count, fname, idlist))
             i += 1
@@ -133,9 +140,9 @@ def write_collection_header(db, coll, ofile):
 
 
 def process_collection(db, coll, ofile, progress=None,
-                       reporter_class=None, multi_pfx=None):
+                       reporter_class=None, multi_pfx=None, exclude=None):
     coll = db.get_collection(coll)
-    found = extract_schemas(coll, progress=progress)
+    found = extract_schemas(coll, progress=progress, skip_fields=exclude)
     reporter = reporter_class(ofile, db.name, coll)
     print_reports(ofile, found, reporter, multi_pfx=multi_pfx)
 
@@ -174,7 +181,7 @@ def main():
                    help='Create multiple files, one per schema and store '
                         'them in <DIR>/<OFILE>_<#>')
     p.add_argument('-f', '--format', dest='fmt', default='text',
-                   help='Output format (text, json) default=text')
+                   help='Output format', choices=['json', 'text'])
     p.add_argument('-o', '--output', dest='output', default='-',
                    metavar='OFILE',
                    help='Output file, default=stdout')
@@ -184,6 +191,7 @@ def main():
     p.add_argument('-s', '--server', dest='host', default=None)
     p.add_argument('-v', '--verbose', dest='vb', action='count', default=0,
                    help='More messages from the program')
+    p.add_argument('-x', '--exclude', dest='ex', nargs='*', help='Fields to exclude')
     args = p.parse_args()
     #
     _root_logger = core.get_logger()
@@ -243,7 +251,7 @@ def main():
         _log.info('Processing collection "{}" in DB "{}"'.format(args.coll,
                                                                  args.db))
         process_collection(db, args.coll, ofile, progress=args.progress,
-                           reporter_class=rclass, multi_pfx=multi_pfx)
+                           reporter_class=rclass, multi_pfx=multi_pfx, exclude=args.ex)
     return 0
 
 
