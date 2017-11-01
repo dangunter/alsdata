@@ -2,6 +2,7 @@
 Core functionality for alsdata
 """
 import logging
+import pendulum
 import six
 
 _LOG_ROOT = 'alsdata'
@@ -57,6 +58,11 @@ class Schema(object):
         self._done = False
         self._cur_arr_idx = None
         self._cur_arr_set = SchemaSet()
+        self._date = pendulum.utcfromtimestamp(0)
+
+    @property
+    def date(self):
+        return self._date
 
     @property
     def table(self):
@@ -128,7 +134,8 @@ class Schema(object):
         lines.append('-' * 45)
         return '\n'.join(lines)
 
-    def done(self):
+    def done(self, date=None):
+        self._date = date
         n = len(self._table)
         last_idx = len(self._table[0])  # row length
         # Add an index column
@@ -192,8 +199,32 @@ class SchemaFactory(object):
     def process(self, input_data: dict) -> Schema:
         self._schema = Schema()
         self._process_dict(-1, 0, input_data)
-        self._schema.done()
+        self._schema.done(date=self._extract_date(input_data))
         return self._schema
+
+    @staticmethod
+    def _extract_date(d):
+        """Extract date wherever it can be found.
+        """
+        if 'date' in d:
+            value = d['date']
+            if isinstance(value, str):
+                dt = pendulum.parse(value)
+            elif isinstance(value, int):
+                dt = pendulum.utcfromtimestamp(float(value))
+            elif isinstance(value, float):
+                dt = pendulum.utcfromtimestamp(value)
+            else:
+                dt = pendulum.utcfromtimestamp(0)
+        elif 'fs' in d and 'date' in d['fs']:
+            dt = pendulum.parse(d['fs']['date'])
+        elif 'lastupdate' in d:
+            dt = pendulum.utcfromtimestamp(d['lastupdate'])
+        elif 'time' in d:
+            dt = pendulum.utcfromtimestamp(d['time'])
+        else:
+            dt = pendulum.utcfromtimestamp(0)
+        return dt
 
     def _process_dict(self, n: int, depth: int, obj: dict):
         """Process contents of `obj`, at index `n` and depth `depth`.
@@ -242,18 +273,38 @@ class SchemaSet(object):
     """
     def __init__(self):
         self.schemas = {}
+        self._dtrange = [] # (max dt, min dt, schema)
+        self._dtrange_idx = {}
 
-    def add(self, s, id_) -> bool:
+    def add(self, s, id_):
         is_new = False
         try:
             self.schemas[s].append(id_)
+            dt = s.date
+            i = self._dtrange_idx[s]
+            dtrange = self._dtrange[i]
+            if dt is None:
+                pass
+            elif dt > dtrange[0]:
+                dtrange[0] = dt
+            elif dt < dtrange[1]:
+                dtrange[1] = dt
         except KeyError:
             is_new = True
             self.schemas[s] = [id_]
+            idx = len(self._dtrange)
+            # putting `idx` in tuple avoids sort comparisons on 's'
+            self._dtrange.append([s.date, s.date, idx, s])
+            self._dtrange_idx[s] = idx
         return is_new
 
     def items(self):
         return six.iteritems(self.schemas)
+
+    def items_bydate(self):
+        for item in sorted(self._dtrange):
+            s = item[3]
+            yield (item[1], item[0]), s, self.schemas[s]
 
     def __iter__(self):
         return iter(self.schemas.keys())
