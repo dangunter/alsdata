@@ -1,4 +1,5 @@
 mypy
+pendulum
 pymongo
 pytest
 six
